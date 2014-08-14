@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.altbeacon.beacon.service.BeaconService;
+import org.altbeacon.beacon.service.TransmitterData;
 import org.altbeacon.beacon.simulator.BeaconSimulator;
 import org.altbeacon.beacon.service.StartRMData;
 
@@ -41,6 +42,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.Messenger;
@@ -90,7 +92,7 @@ import android.util.Log;
  *  </code></pre>
  * 
  * @author David G. Young
- *
+ * @author Christian Melchior
  */
 @TargetApi(4)
 public class BeaconManager {
@@ -105,6 +107,8 @@ public class BeaconManager {
     private ArrayList<Region> monitoredRegions = new ArrayList<Region>();
     private ArrayList<Region> rangedRegions = new ArrayList<Region>();
     private ArrayList<BeaconParser> beaconParsers = new ArrayList<BeaconParser>();
+    private ArrayList<BeaconParser> transmitBeaconParsers = new ArrayList<>();
+    private ArrayList<Beacon> transmitBeacons = new ArrayList<>();
     private boolean mBackgroundMode = false;
 
     /**
@@ -195,6 +199,7 @@ public class BeaconManager {
 	protected BeaconManager(Context context) {
 		this.context = context;
         this.beaconParsers.add(new AltBeaconParser());
+        this.transmitBeaconParsers.add(new AltBeaconParser());
 	}
 	/**
 	 * Check if Bluetooth LE is supported by this Android device, and if so, make sure it is enabled.
@@ -597,6 +602,68 @@ public class BeaconManager {
 
     protected void setDataRequestNotifier(RangeNotifier notifier) { this.dataRequestNotifier = notifier; }
     protected RangeNotifier getDataRequestNotifier() { return this.dataRequestNotifier; }
+
+    /**
+     * Tell the BeaconManager to start transmitting the given beacon using the configured
+     * BeaconParsers. eg. if multiple parsers are configured the beacon will be transmitted using
+     * all parsers.
+     *
+     * @see #getTransmitBeaconParsers()
+     * @param beacon        Beacon to transmit. Only ID1-3 is used.
+     * @param advertiseMode Frequency to transmit with. See android.bluetooth.le.AdvertiseSettings
+     * @param txPowerLevel  Power to transmit with. See android.bluetooth.le.AdvertiseSettings
+     */
+    @TargetApi(Build.VERSION_CODES.L)
+    public void startTransmitting(Beacon beacon, int advertiseMode, int txPowerLevel) throws RemoteException {
+        if (android.os.Build.VERSION.SDK_INT < 20) {
+            Log.w(TAG, "Not supported prior to Android-L.  Method invocation will be ignored");
+            return;
+        }
+        if (serviceMessenger == null) {
+            throw new RemoteException("The BeaconManager is not bound to the service.  Call beaconManager.bind(BeaconConsumer consumer) and wait for a callback to onBeaconServiceConnect()");
+        }
+
+        Message msg = Message.obtain(null, BeaconService.MSG_START_TRANSMITTING, 0, 0);
+        TransmitterData obj = new TransmitterData(beacon, advertiseMode, txPowerLevel);
+        msg.obj = obj;
+        serviceMessenger.send(msg);
+        synchronized (transmitBeacons) {
+            transmitBeacons.add(beacon); // TODO Clone?
+        }
+    }
+
+    /**
+     * Tell the BeaconManager to stop transmitting the beacon.
+     *
+     * @param beacon Beacon that should no longer be transmitted.
+     */
+    @TargetApi(Build.VERSION_CODES.L)
+    public void stopTransmitting(Beacon beacon) throws RemoteException {
+        if (android.os.Build.VERSION.SDK_INT < 20) {
+            Log.w(TAG, "Not supported prior to Android-L.  Method invocation will be ignored");
+            return;
+        }
+        if (serviceMessenger == null) {
+            throw new RemoteException("The BeaconManager is not bound to the service.  Call beaconManager.bind(BeaconConsumer consumer) and wait for a callback to onBeaconServiceConnect()");
+        }
+
+        Message msg = Message.obtain(null, BeaconService.MSG_STOP_TRANSMITTING, 0, 0);
+        TransmitterData obj = new TransmitterData(beacon);
+        msg.obj = obj;
+        serviceMessenger.send(msg);
+        synchronized (transmitBeacons) {
+            for (Beacon b : transmitBeacons) {
+                if (b.equals(beacon)) {
+                    transmitBeacons.remove(b);
+                    break;
+                }
+            }
+        }
+    }
+
+    public List<BeaconParser> getTransmitBeaconParsers() {
+        return transmitBeaconParsers;
+    }
 
     private class ConsumerInfo {
         public boolean isConnected = false;

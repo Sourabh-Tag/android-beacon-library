@@ -28,11 +28,16 @@ import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
+import android.bluetooth.le.AdvertiseCallback;
+import android.bluetooth.le.AdvertiseSettings;
+import android.bluetooth.le.AdvertisementData;
+import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.os.AsyncTask;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
@@ -58,15 +63,19 @@ import java.util.Map;
 
 /**
  * @author dyoung
+ * @author Christian Melchior
  */
 
 @TargetApi(5)
 public class BeaconService extends Service {
     public static final String TAG = "BeaconService";
 
+    private static final int RADIUS_NETWORK_BLUETOOTH_MANUFACTURER_ID = 0x0118;
+
     private Map<Region, RangeState> rangedRegionState = new HashMap<Region, RangeState>();
     private Map<Region, MonitorState> monitoredRegionState = new HashMap<Region, MonitorState>();
     private BluetoothAdapter bluetoothAdapter;
+    private BluetoothLeAdvertiser bluetoothAdvertiser;
     private boolean scanning;
     private boolean scanningPaused;
     private Date lastBeaconDetectionTime = new Date();
@@ -78,6 +87,10 @@ public class BeaconService extends Service {
     private boolean scanCyclerStarted = false;
     private boolean scanningEnabled = false;
     private List<BeaconParser> beaconParsers;
+    private Map<TransmitterData, List<AdvertiseCallback>> transmitterBeacons = new HashMap<>();
+    private List<BeaconParser> transmitBeaconParsers;
+    private boolean transmitting = false;
+
 
     /*
      * The scan period is how long we wait between restarting the BLE advertisement scans
@@ -127,7 +140,8 @@ public class BeaconService extends Service {
     public static final int MSG_START_MONITORING = 4;
     public static final int MSG_STOP_MONITORING = 5;
     public static final int MSG_SET_SCAN_PERIODS = 6;
-
+    public static final int MSG_START_TRANSMITTING = 7;
+    public static final int MSG_STOP_TRANSMITTING = 8;
 
     static class IncomingHandler extends Handler {
         private final WeakReference<BeaconService> mService;
@@ -139,38 +153,203 @@ public class BeaconService extends Service {
         @Override
         public void handleMessage(Message msg) {
             BeaconService service = mService.get();
-            StartRMData startRMData = (StartRMData) msg.obj;
+            StartRMData startRMData;
+            TransmitterData transmitterData;
 
             if (service != null) {
                 switch (msg.what) {
                     case MSG_START_RANGING:
                         Log.i(TAG, "start ranging received");
+                        startRMData = (StartRMData) msg.obj;
                         service.startRangingBeaconsInRegion(startRMData.getRegionData(), new org.altbeacon.beacon.service.Callback(startRMData.getCallbackPackageName()));
                         service.setScanPeriods(startRMData.getScanPeriod(), startRMData.getBetweenScanPeriod());
                         break;
                     case MSG_STOP_RANGING:
                         Log.i(TAG, "stop ranging received");
+                        startRMData = (StartRMData) msg.obj;
                         service.stopRangingBeaconsInRegion(startRMData.getRegionData());
                         service.setScanPeriods(startRMData.getScanPeriod(), startRMData.getBetweenScanPeriod());
                         break;
                     case MSG_START_MONITORING:
                         Log.i(TAG, "start monitoring received");
+                        startRMData = (StartRMData) msg.obj;
                         service.startMonitoringBeaconsInRegion(startRMData.getRegionData(), new org.altbeacon.beacon.service.Callback(startRMData.getCallbackPackageName()));
                         service.setScanPeriods(startRMData.getScanPeriod(), startRMData.getBetweenScanPeriod());
                         break;
                     case MSG_STOP_MONITORING:
                         Log.i(TAG, "stop monitoring received");
+                        startRMData = (StartRMData) msg.obj;
                         service.stopMonitoringBeaconsInRegion(startRMData.getRegionData());
                         service.setScanPeriods(startRMData.getScanPeriod(), startRMData.getBetweenScanPeriod());
                         break;
                     case MSG_SET_SCAN_PERIODS:
                         Log.i(TAG, "set scan intervals received");
+                        startRMData = (StartRMData) msg.obj;
                         service.setScanPeriods(startRMData.getScanPeriod(), startRMData.getBetweenScanPeriod());
                         break;
+                    case MSG_START_TRANSMITTING:
+                        Log.i(TAG, "start transmitting received");
+                        transmitterData = (TransmitterData) msg.obj;
+                        service.startTransmitting(transmitterData);
+                        break;
+                    case MSG_STOP_TRANSMITTING:
+                        Log.i(TAG, "stop transmitting received");
+                        transmitterData = (TransmitterData) msg.obj;
+                        service.stopTransmitting(transmitterData.getBeacon());
+                        break;
+
                     default:
                         super.handleMessage(msg);
                 }
             }
+        }
+    }
+
+//    public void startAdvertising()
+//    {
+//        int i;
+//        int j;
+//        String s = uuidField.getText().toString().toLowerCase();
+//        boolean flag;
+//        byte abyte0[];
+//        android.bluetooth.le.AdvertisementData.Builder builder1;
+//        android.bluetooth.le.AdvertiseSettings.Builder builder2;
+//        int k;
+//        int l;
+//        try
+//        {
+//            UUID.fromString(s);
+//        }
+//        catch (Exception exception)
+//        {
+//            stopAdvertising();
+//            enableSwitch.setChecked(false);
+//            android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(this);
+//            builder.setTitle("Invalid Proximity UUID");
+//            builder.setMessage("ID1 must be 32 hex digits separated by dashes");
+//            builder.setPositiveButton(0x104000a, null);
+//            builder.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
+//
+//                final MainActivity this$0;
+//
+//                public void onDismiss(DialogInterface dialoginterface)
+//                {
+//                }
+//
+//
+//                {
+//                    this$0 = MainActivity.this;
+//                    super();
+//                }
+//            });
+//            builder.show();
+//            return;
+//        }
+//        l = Integer.parseInt(majorField.getText().toString());
+//        i = l;
+//        _L4:
+//        k = Integer.parseInt(minorField.getText().toString());
+//        j = k;
+//        _L2:
+//        flag = formatSwitch.isChecked();
+//        boolean flag1 = false;
+//        if (!flag)
+//        {
+//            flag1 = true;
+//        }
+//        abyte0 = getScanData(s, i, j, -59, flag1);
+//        Log.d("MainActivity", (new StringBuilder("Starting advertising with ID1: ")).append(s).append(" ID2: ").append(i).append(" ID3: ").append(j).toString());
+//        try
+//        {
+//            builder1 = new android.bluetooth.le.AdvertisementData.Builder();
+//            builder1.setManufacturerData(280, abyte0);
+//            builder2 = new android.bluetooth.le.AdvertiseSettings.Builder();
+//            builder2.setAdvertiseMode(1);
+//            builder2.setTxPowerLevel(3);
+//            builder2.setType(0);
+//            bluetoothAdvertiser.startAdvertising(builder2.build(), builder1.build(), advertiseCallback);
+//            return;
+//        }
+//        catch (Exception exception1)
+//        {
+//            exception1.printStackTrace();
+//        }
+//        return;
+//        NumberFormatException numberformatexception1;
+//        numberformatexception1;
+//        j = 0;
+//        if (true) goto _L2; else goto _L1
+//        _L1:
+//        NumberFormatException numberformatexception;
+//        numberformatexception;
+//        i = 0;
+//        if (true) goto _L4; else goto _L3
+//        _L3:
+//    }
+
+
+    @TargetApi(Build.VERSION_CODES.L)
+    private void startTransmitting(TransmitterData transmitBeaconData) {
+        synchronized (transmitterBeacons) {
+            if (transmitterBeacons.containsKey(transmitBeaconData.getBeacon())) {
+                Log.i(TAG, "Already transmitting beacon - do nothing");
+            } else {
+
+                // Update BeaconParsers
+                transmitBeaconParsers = BeaconManager.getInstanceForApplication(getApplicationContext()).getTransmitBeaconParsers();
+
+                // Builder LE advertisment package for each BeaconParser
+                List<AdvertiseCallback> callbacks = new ArrayList<>();
+                for (BeaconParser parser : transmitBeaconParsers) {
+
+                    AdvertisementData data = new AdvertisementData.Builder()
+                            .setManufacturerData(RADIUS_NETWORK_BLUETOOTH_MANUFACTURER_ID, parser.constructAdvertismentPackage(transmitBeaconData.getBeacon(), -59))
+                            .build();
+
+                    AdvertiseSettings settings = new AdvertiseSettings.Builder()
+                            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
+                            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                            .setType(AdvertiseSettings.ADVERTISE_TYPE_NON_CONNECTABLE)
+                            .build();
+
+                    AdvertiseCallback callback = new AdvertiseCallback() {
+                        @Override
+                        public void onSuccess(AdvertiseSettings advertiseSettings) {
+                            Log.i("MainActivity", "Advertisement succeeded.");
+                        }
+
+                        @Override
+                        public void onFailure(int i) {
+                            Log.e(TAG, "Advertisment failed: " + i);
+                        }
+                    };
+
+                    getBluetoothAdvertiser().startAdvertising(settings, data, callback);
+                    callbacks.add(callback);
+                }
+
+                transmitterBeacons.put(transmitBeaconData, callbacks);
+            }
+        }
+    }
+
+    @TargetApi(Build.VERSION_CODES.L)
+    private void stopTransmitting(Beacon beacon) {
+        synchronized (transmitterBeacons) {
+            TransmitterData deleteData = null;
+            for (TransmitterData data : transmitterBeacons.keySet()) {
+                if (data.getBeacon().equals(beacon)) {
+                    List<AdvertiseCallback> callbacks = transmitterBeacons.get(data);
+                    for (AdvertiseCallback callback : callbacks) {
+                        getBluetoothAdvertiser().stopAdvertising(callback);
+                    }
+                    deleteData = data;
+                    break;
+                }
+            }
+
+            transmitterBeacons.remove(deleteData);
+            Log.i(TAG, "Transmitting beacon has stopped");
         }
     }
 
@@ -671,4 +850,12 @@ public class BeaconService extends Service {
         return bluetoothAdapter;
     }
 
+    @TargetApi(20)
+    private BluetoothLeAdvertiser getBluetoothAdvertiser() {
+        if (android.os.Build.VERSION.SDK_INT < 20) {
+            Log.w(TAG, "Not supported prior to API 20.");
+            return null;
+        }
+        return getBluetoothAdapter().getBluetoothLeAdvertiser();
+    }
 }

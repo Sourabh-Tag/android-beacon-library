@@ -58,6 +58,18 @@ public class AltBeaconParser extends BeaconParser {
         return fromScanData(scanData, rssi, device, new AltBeacon());
     }
 
-
-
+    @Override
+    public byte[] constructAdvertismentPackage(Beacon beacon, int measuredPower) {
+        byte[] advertismentPackage = new byte[26];
+        advertismentPackage[0] = (byte) 0x18;  // Radius Network ID, Big Endian
+        advertismentPackage[1] = (byte) 0x01;
+        advertismentPackage[2] = (byte) 0xBE;  // Identifies advertisement as AltBeacon
+        advertismentPackage[3] = (byte) 0xAC;
+        System.arraycopy(uuidToBytes(beacon.getId1().toString()), 0, advertismentPackage, 4, 16); // ID1
+        System.arraycopy(uint16ToBytes(beacon.getId2().toInt()), 0, advertismentPackage, 20, 2); // ID2
+        System.arraycopy(uint16ToBytes(beacon.getId3().toInt()), 0, advertismentPackage, 22, 2); // ID3
+        advertismentPackage[24] = int8ToByte(measuredPower);
+        advertismentPackage[25] = 0;
+        return advertismentPackage;
+    }
 }

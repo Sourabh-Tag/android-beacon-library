@@ -62,11 +62,9 @@ public class RangingData implements Parcelable {
     	out.writeParcelableArray(beacons.toArray(new Parcelable[0]), flags);
     	out.writeParcelable(region, flags);
     	BeaconManager.logDebug(TAG, "done writing RangingData");
-
     }
 
-    public static final Parcelable.Creator<RangingData> CREATOR
-            = new Parcelable.Creator<RangingData>() {
+    public static final Parcelable.Creator<RangingData> CREATOR = new Parcelable.Creator<RangingData>() {
         public RangingData createFromParcel(Parcel in) {
             return new RangingData(in);
         }

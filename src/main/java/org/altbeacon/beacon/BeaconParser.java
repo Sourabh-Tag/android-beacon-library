@@ -4,8 +4,10 @@ import android.annotation.TargetApi;
 import android.bluetooth.BluetoothDevice;
 import android.util.Log;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,7 +32,7 @@ import java.util.regex.Pattern;
  * </p>
  *
  */
-public class BeaconParser {
+public abstract class BeaconParser {
     private static final String TAG = "BeaconParser";
     private static final Pattern I_PATTERN = Pattern.compile("i\\:(\\d+)\\-(\\d+)");
     private static final Pattern M_PATTERN = Pattern.compile("m\\:(\\d+)-(\\d+)\\=([0-9A-F-a-f]+)");
@@ -203,13 +205,15 @@ public class BeaconParser {
         return fromScanData(scanData, rssi, device, new Beacon());
     }
 
+    final protected static char[] hexArray = "0123456789ABCDEF".toCharArray();
+
     @TargetApi(5)
     protected Beacon fromScanData(byte[] scanData, int rssi, BluetoothDevice device, Beacon beacon) {
 
         int startByte = 2;
         boolean patternFound = false;
         byte[] typeCodeBytes = longToByteArray(getMatchingBeaconTypeCode(), mMatchingBeaconTypeCodeEndOffset-mMatchingBeaconTypeCodeStartOffset+1);
-
+        String hexScanData = bytesToHex(scanData);
         while (startByte <= 5) {
             if (byteArraysMatch(scanData, startByte+mMatchingBeaconTypeCodeStartOffset, typeCodeBytes, 0)) {
                 patternFound = true;
@@ -295,6 +299,35 @@ public class BeaconParser {
             hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
         }
         return new String(hexChars);
+    }
+
+    /**
+     * Returns the BLE advertisment package for the given beacon using the specified parserformat.
+     *
+     * @param beacon        Beacon data to encode.
+     * @param measuredPower RSSI at 1m from the device.
+     * @return BLE advertisment package matching the beacon spec and identifiers.
+     */
+    abstract public byte[] constructAdvertismentPackage(Beacon beacon, int measuredPower);
+
+    protected byte int8ToByte(int i) {
+        if (i < 0) return (byte)(i + 256);
+        return (byte)(i & 0x7F);
+    }
+
+    protected byte[] uint16ToBytes(int i) {
+        byte[] bytes = new byte[2];
+        bytes[0] = ((byte)(i / 256));
+        bytes[1] = ((byte)(i & 0xFF));
+        return bytes;
+    }
+
+    protected byte[] uuidToBytes(String uuid) {
+        UUID localUUID = UUID.fromString(uuid);
+        ByteBuffer localByteBuffer = ByteBuffer.wrap(new byte[16]);
+        localByteBuffer.putLong(localUUID.getMostSignificantBits());
+        localByteBuffer.putLong(localUUID.getLeastSignificantBits());
+        return localByteBuffer.array();
     }
 
     public static class BeaconLayoutException extends RuntimeException {
